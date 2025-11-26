@@ -1,0 +1,4 @@
+## Append samples of your project ##
+resources:
+- autofix_v1_aiopsanalyzer.yaml
+# +kubebuilder:scaffold:manifestskustomizesamples

@@ -1,0 +1,413 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.16.4
+  name: aiopsanalyzers.autofix.aiops.com
+spec:
+  group: autofix.aiops.com
+  names:
+    kind: AIOpsAnalyzer
+    listKind: AIOpsAnalyzerList
+    plural: aiopsanalyzers
+    shortNames:
+    - aia
+    - aiops
+    singular: aiopsanalyzer
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.target.selector.matchLabels.app
+      name: App
+      type: string
+    - jsonPath: .spec.target.namespace
+      name: Namespace
+      type: string
+    - jsonPath: .status.summary
+      name: Status
+      type: string
+    - jsonPath: .status.gitOps.pr.number
+      name: PR
+      priority: 10
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1
+    schema:
+      openAPIV3Schema:
+        description: AIOpsAnalyzer 是 AI 驱动的 GitOps 自动修复资源
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            properties:
+              analysisInterval:
+                default: 5m
+                description: 分析周期
+                pattern: ^(\d+m|\d+h|\d+s)$
+                type: string
+              autoRemediation:
+                description: 自动修复策略
+                properties:
+                  allowedActions:
+                    description: 允许的修复类型（可多选）
+                    enum:
+                    - scale
+                    - restart
+                    - config
+                    - traffic
+                    - resource
+                    - feature-toggle
+                    items:
+                      type: string
+                    type: array
+                  enabled:
+                    default: true
+                    description: 是否启用自动修复
+                    type: boolean
+                  requireApproval:
+                    default: true
+                    description: 是否需要飞书审批
+                    type: boolean
+                type: object
+              feishu:
+                description: 飞书通知与审批配置
+                properties:
+                  approvalTimeout:
+                    default: 10m
+                    description: 审批超时时间
+                    type: string
+                  mentionRoles:
+                    items:
+                      type: string
+                    type: array
+                  mentionUsers:
+                    description: 可选：@指定的审批人（支持多个）
+                    items:
+                      type: string
+                    type: array
+                  receiveId:
+                    type: string
+                  receiveIdType:
+                    description: 接收消息的类型和 ID（支持私聊、群聊、指定人）
+                    enum:
+                    - user_id
+                    - open_id
+                    - union_id
+                    - user_open_id
+                    - chat_id
+                    - email
+                    type: string
+                required:
+                - receiveId
+                - receiveIdType
+                type: object
+              gitOps:
+                description: GitOps 配置
+                properties:
+                  branch:
+                    default: main
+                    description: 分支
+                    type: string
+                  commitAuthorEmail:
+                    type: string
+                  commitAuthorName:
+                    description: 可选：提交者信息
+                    type: string
+                  path:
+                    description: 应用在仓库中的路径
+                    type: string
+                  repoURL:
+                    description: Git 仓库地址（支持 https 和 ssh）
+                    type: string
+                  tokenSecretRef:
+                    description: Git 认证 Secret（包含 token 或 ssh key）
+                    properties:
+                      name:
+                        default: ""
+                        description: |-
+                          Name of the referent.
+                          This field is effectively required, but due to backwards compatibility is
+                          allowed to be empty. Instances of this type with an empty value here are
+                          almost certainly wrong.
+                          More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                        type: string
+                    type: object
+                    x-kubernetes-map-type: atomic
+                required:
+                - path
+                - repoURL
+                - tokenSecretRef
+                type: object
+              target:
+                description: 监控目标
+                properties:
+                  namespace:
+                    type: string
+                  selector:
+                    description: |-
+                      A label selector is a label query over a set of resources. The result of matchLabels and
+                      matchExpressions are ANDed. An empty label selector matches all objects. A null
+                      label selector matches no objects.
+                    properties:
+                      matchExpressions:
+                        description: matchExpressions is a list of label selector
+                          requirements. The requirements are ANDed.
+                        items:
+                          description: |-
+                            A label selector requirement is a selector that contains values, a key, and an operator that
+                            relates the key and values.
+                          properties:
+                            key:
+                              description: key is the label key that the selector
+                                applies to.
+                              type: string
+                            operator:
+                              description: |-
+                                operator represents a key's relationship to a set of values.
+                                Valid operators are In, NotIn, Exists and DoesNotExist.
+                              type: string
+                            values:
+                              description: |-
+                                values is an array of string values. If the operator is In or NotIn,
+                                the values array must be non-empty. If the operator is Exists or DoesNotExist,
+                                the values array must be empty. This array is replaced during a strategic
+                                merge patch.
+                              items:
+                                type: string
+                              type: array
+                              x-kubernetes-list-type: atomic
+                          required:
+                          - key
+                          - operator
+                          type: object
+                        type: array
+                        x-kubernetes-list-type: atomic
+                      matchLabels:
+                        additionalProperties:
+                          type: string
+                        description: |-
+                          matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels
+                          map is equivalent to an element of matchExpressions, whose key field is "key", the
+                          operator is "In", and the values array contains only "value". The requirements are ANDed.
+                        type: object
+                    type: object
+                    x-kubernetes-map-type: atomic
+                required:
+                - selector
+                type: object
+              thresholds:
+                description: 阈值配置（可选，AI 可覆盖）
+                properties:
+                  cpu:
+                    type: string
+                  errorLogPerMinute:
+                    format: int32
+                    type: integer
+                  memory:
+                    type: string
+                  restartCount:
+                    format: int32
+                    type: integer
+                type: object
+            required:
+            - feishu
+            - gitOps
+            - target
+            type: object
+          status:
+            properties:
+              gitOps:
+                description: GitOps PR 状态
+                properties:
+                  lastCommitSHA:
+                    description: 最后一次提交的 commit hash
+                    type: string
+                  lastSyncedTime:
+                    description: 最后同步时间（ArgoCD 同步后可通过 event 更新）
+                    format: date-time
+                    type: string
+                  pr:
+                    properties:
+                      merged:
+                        type: boolean
+                      mergedAt:
+                        format: date-time
+                        type: string
+                      number:
+                        type: integer
+                      status:
+                        type: string
+                      url:
+                        type: string
+                    type: object
+                type: object
+              insights:
+                description: AI 分析结论
+                type: string
+              lastAnalysisTime:
+                description: 最近分析时间
+                format: date-time
+                type: string
+              observedGeneration:
+                description: 标准字段
+                format: int64
+                type: integer
+              pendingApproval:
+                description: 当前待审批请求
+                properties:
+                  approved:
+                    description: 审批状态
+                    type: boolean
+                  approvedBy:
+                    type: string
+                  expiresAt:
+                    format: date-time
+                    type: string
+                  messageID:
+                    description: 飞书消息 ID（用于更新卡片）
+                    type: string
+                  reason:
+                    type: string
+                  requestID:
+                    description: 唯一请求 ID（用于飞书回调匹配）
+                    type: string
+                  requestedAt:
+                    description: 请求时间与过期时间
+                    format: date-time
+                    type: string
+                required:
+                - expiresAt
+                - requestID
+                - requestedAt
+                type: object
+              proposedRemediation:
+                description: AI patch补丁
+                properties:
+                  actionType:
+                    description: AI 建议执行的动作类型
+                    enum:
+                    - scale
+                    - restart
+                    - feature-toggle
+                    - traffic-shift
+                    - resource-adjust
+                    - config-change
+                    type: string
+                  generatedAt:
+                    description: 生成时间
+                    format: date-time
+                    type: string
+                  patches:
+                    description: 结构化的补丁内容（Operator 直接序列化成 YAML 提交 Git）
+                    items:
+                      description: 单个 patch 操作（完全对应 Kubernetes Patch API）
+                      properties:
+                        op:
+                          description: Patch 类型
+                          enum:
+                          - replace
+                          - add
+                          - remove
+                          type: string
+                        path:
+                          description: JSON Path（如 /spec/replicas）
+                          type: string
+                        targetRef:
+                          description: ObjectReference contains enough information
+                            to let you inspect or modify the referred object.
+                          properties:
+                            apiVersion:
+                              description: API version of the referent.
+                              type: string
+                            fieldPath:
+                              description: |-
+                                If referring to a piece of an object instead of an entire object, this string
+                                should contain a valid JSON/Go field access statement, such as desiredState.manifest.containers[2].
+                                For example, if the object reference is to a container within a pod, this would take on a value like:
+                                "spec.containers{name}" (where "name" refers to the name of the container that triggered
+                                the event) or if no container name is specified "spec.containers[2]" (container with
+                                index 2 in this pod). This syntax is chosen only to have some well-defined way of
+                                referencing a part of an object.
+                              type: string
+                            kind:
+                              description: |-
+                                Kind of the referent.
+                                More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+                              type: string
+                            name:
+                              description: |-
+                                Name of the referent.
+                                More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                              type: string
+                            namespace:
+                              description: |-
+                                Namespace of the referent.
+                                More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/namespaces/
+                              type: string
+                            resourceVersion:
+                              description: |-
+                                Specific resourceVersion to which this reference is made, if any.
+                                More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#concurrency-control-and-consistency
+                              type: string
+                            uid:
+                              description: |-
+                                UID of the referent.
+                                More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#uids
+                              type: string
+                          type: object
+                          x-kubernetes-map-type: atomic
+                        value:
+                          description: 新值（任意类型，json.Marshal 后提交）
+                          type: object
+                          x-kubernetes-preserve-unknown-fields: true
+                      required:
+                      - op
+                      - path
+                      - value
+                      type: object
+                    type: array
+                  reason:
+                    description: AI 给出的理由（给人看 + 写进 PR 描述）
+                    type: string
+                  severity:
+                    description: 建议的紧急程度
+                    enum:
+                    - low
+                    - medium
+                    - high
+                    - critical
+                    type: string
+                required:
+                - actionType
+                - generatedAt
+                - patches
+                - reason
+                type: object
+              summary:
+                default: Healthy
+                description: 简要状态
+                type: string
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

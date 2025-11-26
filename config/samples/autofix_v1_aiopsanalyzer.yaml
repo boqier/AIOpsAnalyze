@@ -1,0 +1,9 @@
+apiVersion: autofix.aiops.com/v1
+kind: AIOpsAnalyzer
+metadata:
+  labels:
+    app.kubernetes.io/name: aiopsanalyzer
+    app.kubernetes.io/managed-by: kustomize
+  name: aiopsanalyzer-sample
+spec:
+  # TODO(user): Add fields here
