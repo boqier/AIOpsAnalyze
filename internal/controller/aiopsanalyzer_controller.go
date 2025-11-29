@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -44,8 +45,8 @@ type AIOpsAnalyzerReconciler struct {
 
 // 常量定义
 const (
-	prometheusQueryEndpoint = "http://prometheus-k8s.monitoring.svc.cluster.local:9090/api/v1/query"
-	lokiQueryEndpoint       = "http://loki-gateway.monitoring.svc.cluster.local:3100/loki/api/v1/query"
+	prometheusQueryEndpoint = "http://101.32.41.178:32606/api/v1/query"
+	lokiQueryEndpoint       = "http://101.32.41.178:32377/loki/api/v1/query"
 )
 
 // +kubebuilder:rbac:groups=autofix.aiops.com,resources=aiopsanalyzers,verbs=get;list;watch;create;update;patch;delete
@@ -89,11 +90,12 @@ func (r *AIOpsAnalyzerReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	eventString, err := r.BuildEventString(ctx, &aiopsAnalyzer.Spec.Target)
 	if err != nil {
 		log.Error(err, "构建event string失败")
-		return ctrl.Result{}, err
+		return ctrl.Result{RequeueAfter: 10 * time.Second}, err
 	}
 
 	// 5. 处理event string（根据您的业务逻辑）
 	log.Info("成功构建event string", "length", len(eventString))
+	log.Info("event string内容", "content", eventString)
 	// 可以将eventString用于后续的AI分析、通知等
 
 	return ctrl.Result{}, nil
@@ -288,23 +290,53 @@ func (r *AIOpsAnalyzerReconciler) GetPrometheusAlerts(ctx context.Context, targe
 func (r *AIOpsAnalyzerReconciler) GetLokiLogs(ctx context.Context, target *autofixv1.TargetSelector) (string, error) {
 	log := log.FromContext(ctx)
 
-	// 构建Loki查询
-	query := fmt.Sprintf("{namespace='%s'}", target.Namespace)
+	// 构建 LogQL 查询：关键修复点是将所有标签值从单引号 ' 更改为双引号 "
+	query := fmt.Sprintf("{namespace=\"%s\"", target.Namespace)
+	log.Info("查询命名空间", "namespace", target.Namespace)
+
 	if target.Selector.MatchLabels != nil {
 		for k, v := range target.Selector.MatchLabels {
-			query += fmt.Sprintf(",%s='%s'", k, v)
+			// 使用双引号 " 包裹标签值
+			query += fmt.Sprintf(",%s=\"%s\"", k, v)
 		}
 	}
-	query += " |= \"error\" or |= \"ERROR\" or |= \"panic\" or |= \"PANIC\""
+	// 正则表达式部分保持不变，使用反引号 `
+	// 直接用 or 连接多个字面量匹配（大小写分开写，覆盖所有常见变体）
+	query += "} |~ \"(?i)(error|panic|fatal|critical)\""
 
-	// 发送请求
-	timeRange := time.Now().Add(-5*time.Minute).UnixNano() / int64(time.Millisecond)
-	resp, err := http.Get(fmt.Sprintf("%s?query=%s&time=%d", lokiQueryEndpoint, url.QueryEscape(query), timeRange))
+	// 这一行计算的是毫秒时间戳
+	timeRange := time.Now().Add(-48*time.Minute).UnixNano() / int64(time.Millisecond)
+	log.Info("查询起始时间", "timeRange", time.Now().Add(-48*time.Minute).Format("2006-01-02 15:04:05"))
+	log.Info("query 语句", "query", query)
+	log.Info("查询时间范围", "timeRange", timeRange)
+	// 对完整的 LogQL query 进行 URL 编码
+	url := fmt.Sprintf("%s?query=%s&start=%d", lokiQueryEndpoint, url.QueryEscape(query), timeRange)
+
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return "", err
+	}
+
+	// 关键行：设置 X-Scope-OrgID header
+	req.Header.Set("X-Scope-OrgID", "1")
+
+	client := &http.Client{Timeout: 15 * time.Second}
+	resp, err := client.Do(req)
 	if err != nil {
 		log.Error(err, "发送Loki查询请求失败")
 		return "", err
 	}
 	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		log.Error(nil, "Loki返回非200", "status", resp.StatusCode, "body", string(body))
+		return "", fmt.Errorf("loki returned %d: %s", resp.StatusCode, string(body))
+	}
+
+	// 注意：这里打印 resp.Body 是错误的，因为它是一个 io.ReadCloser，需要先读取才能打印内容
+	// 但为了保持原意，我们继续往下解析。
+	log.Info("Loki查询响应", "status", resp.StatusCode)
 
 	// 解析响应
 	var result map[string]interface{}
@@ -312,7 +344,7 @@ func (r *AIOpsAnalyzerReconciler) GetLokiLogs(ctx context.Context, target *autof
 		log.Error(err, "解析Loki响应失败")
 		return "", err
 	}
-
+	log.Info("Loki查询响应", "result", result)
 	// 格式化日志信息
 	var logsBuilder strings.Builder
 	if data, ok := result["data"].(map[string]interface{}); ok {
@@ -323,6 +355,7 @@ func (r *AIOpsAnalyzerReconciler) GetLokiLogs(ctx context.Context, target *autof
 						if values, ok := streamData["values"].([]interface{}); ok {
 							for _, value := range values {
 								if logEntry, ok := value.([]interface{}); ok && len(logEntry) >= 2 {
+									// logEntry[0] 是时间戳，logEntry[1] 是日志行内容
 									logsBuilder.WriteString(fmt.Sprintf("%s: %s\n", logEntry[0], logEntry[1]))
 								}
 							}
@@ -353,7 +386,7 @@ func (r *AIOpsAnalyzerReconciler) BuildEventString(ctx context.Context, target *
 		log.Error(err, "获取Prometheus告警失败")
 		return "", err
 	}
-
+	log.Info("Prometheus告警信息", "alerts", prometheusAlerts)
 	// 3. 获取Loki日志
 	lokiLogs, err := r.GetLokiLogs(ctx, target)
 	if err != nil {

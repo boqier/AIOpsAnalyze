@@ -1,0 +1,41 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web-app-backend
+  namespace: product-a
+  labels:
+    app: web-app-backend
+    env: prod
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: web-app-backend
+      env: prod
+  template:
+    metadata:
+      labels:
+        app: web-app-backend
+        env: prod
+    spec:
+      containers:
+      - name: backend
+        image: nginx:latest
+        ports:
+        - containerPort: 80
+        # 下面这行命令会让容器不断输出 error 日志，方便测试日志收集
+        command: ["/bin/sh"]
+        args:
+          - -c
+          - >
+            while true; do
+              echo "$(date) - ERROR - Something bad happened in web-app-backend (env=prod)" ;
+              sleep 5;
+            done
+        resources:
+          limits:
+            cpu: "500m"
+            memory: "512Mi"
+          requests:
+            cpu: "200m"
+            memory: "256Mi"
